@@ -43,6 +43,9 @@ const initialHorses = [
     photo:
       "https://images.unsplash.com/photo-1553284965-83fd3e82fa5a?auto=format&fit=crop&w=1200&q=80",
     diet: "Foin à volonté, sans avoine. CMV matin et soir.",
+    vet: "Clinique equine des Vallons",
+    farrier: "Julien Martin",
+    careMax: "250",
     vaccine: "2026-05-14",
     status: "Présente",
     owners: ["Camille Bernard"],
@@ -69,6 +72,9 @@ const initialHorses = [
     photo:
       "https://images.unsplash.com/photo-1566251037378-5e04e3bec343?auto=format&fit=crop&w=1200&q=80",
     diet: "2 L granulés matin et soir. Foin humidifié.",
+    vet: "Dr Carole Perrin",
+    farrier: "Mathieu Robert",
+    careMax: "180",
     vaccine: "2026-02-09",
     status: "En sortie",
     owners: ["Thomas Leroy"],
@@ -443,6 +449,9 @@ export default function App() {
       : hasRiderLink
         ? "slate"
         : "red";
+  const actorName = isAdmin
+    ? "Admin Écurie"
+    : currentRider?.name || currentUser?.displayName || currentUser?.email || "Utilisateur";
   const isSaving = cloud === "saving";
   const googleProvider = new GoogleAuthProvider();
   const readImageAsDataUrl = (file) =>
@@ -462,6 +471,13 @@ export default function App() {
         reject(reader.error || new Error("Image read error"));
       reader.readAsDataURL(file);
     });
+  const normalizeCareMax = (value) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return "";
+    return String(Math.max(0, parsed));
+  };
   const addCare = async (e) => {
     e.preventDefault();
     if (!selected || !canEditHorseId(selected.id)) {
@@ -478,7 +494,7 @@ export default function App() {
         date: f.get("date"),
         type: f.get("type"),
         note: f.get("note"),
-        by: "Admin Écurie",
+        by: actorName,
       };
     const nextHorses = horses.map((h) =>
       h.id === selectedHorse ? { ...h, care: [c, ...h.care] } : h,
@@ -486,7 +502,7 @@ export default function App() {
     const auditEntry = {
       id: Date.now(),
       at: new Date().toLocaleString("fr-FR"),
-      user: "Admin Écurie",
+      user: actorName,
       action: "Soin ajouté",
       subject: selected.name,
       detail: `${c.type} • ${c.note}`,
@@ -533,7 +549,7 @@ export default function App() {
         place: f.get("place"),
         date: f.get("date"),
         duration: f.get("duration"),
-        by: "Admin Écurie",
+        by: actorName,
       };
     const nextHorses = horses.map((h) =>
       h.id === selectedHorse
@@ -543,7 +559,7 @@ export default function App() {
     const auditEntry = {
       id: Date.now(),
       at: new Date().toLocaleString("fr-FR"),
-      user: "Admin Écurie",
+      user: actorName,
       action: "Sortie signalée",
       subject: selected.name,
       detail: `${o.place} • ${o.duration}`,
@@ -606,6 +622,9 @@ export default function App() {
         arrival: f.get("arrival"),
         box: f.get("box"),
         diet: f.get("diet"),
+        vet: String(f.get("vet") || ""),
+        farrier: String(f.get("farrier") || ""),
+        careMax: normalizeCareMax(f.get("careMax")),
         vaccine: f.get("vaccine"),
         status: "Présent",
         owners: [],
@@ -744,6 +763,9 @@ export default function App() {
       arrival: f.get("arrival"),
       box: f.get("box"),
       diet: f.get("diet"),
+      vet: String(f.get("vet") || ""),
+      farrier: String(f.get("farrier") || ""),
+      careMax: normalizeCareMax(f.get("careMax")),
       vaccine: f.get("vaccine"),
       status: f.get("status"),
       photo,
@@ -1356,6 +1378,21 @@ export default function App() {
               <p className="text-sm text-slate-600">{c}</p>
             </section>
           ))}
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <h2 className="mb-2 font-bold">Fiche véto</h2>
+            <div className="space-y-1 text-sm text-slate-600">
+              <p>
+                <b>Vétérinaire :</b> {selected.vet || "Non renseigné"}
+              </p>
+              <p>
+                <b>Maréchal-ferrant :</b> {selected.farrier || "Non renseigné"}
+              </p>
+              <p>
+                <b>Montant max soins acceptés :</b>{" "}
+                {selected.careMax ? `${selected.careMax} €` : "Non renseigné"}
+              </p>
+            </div>
+          </section>
           <section className="rounded-2xl bg-white p-5">
             <h2 className="mb-3 font-bold">Historique des soins</h2>
             {selected.care.map((c) => (
@@ -1794,6 +1831,9 @@ export default function App() {
               ["Date de naissance", "birth", "date"],
               ["Date d'arrivée", "arrival", "date"],
               ["Box / emplacement", "box", "text"],
+              ["Vétérinaire", "vet", "text"],
+              ["Maréchal-ferrant", "farrier", "text"],
+              ["Montant max soins acceptés (€)", "careMax", "number"],
               ["Dernier vaccin", "vaccine", "date"],
             ].map(([l, n, t]) => (
               <Field key={n} label={l}>
@@ -1801,6 +1841,8 @@ export default function App() {
                   required={n === "name"}
                   name={n}
                   type={t}
+                  min={n === "careMax" ? "0" : undefined}
+                  step={n === "careMax" ? "0.01" : undefined}
                   className={input}
                 />
               </Field>
@@ -1847,6 +1889,19 @@ export default function App() {
               ["Date de naissance", "birth", "date", horseToEdit.birth],
               ["Date d'arrivée", "arrival", "date", horseToEdit.arrival],
               ["Box / emplacement", "box", "text", horseToEdit.box],
+              ["Vétérinaire", "vet", "text", horseToEdit.vet || ""],
+              [
+                "Maréchal-ferrant",
+                "farrier",
+                "text",
+                horseToEdit.farrier || "",
+              ],
+              [
+                "Montant max soins acceptés (€)",
+                "careMax",
+                "number",
+                horseToEdit.careMax || "",
+              ],
               ["Dernier vaccin", "vaccine", "date", horseToEdit.vaccine],
             ].map(([l, n, t, v]) => (
               <Field key={n} label={l}>
@@ -1855,6 +1910,8 @@ export default function App() {
                   name={n}
                   type={t}
                   defaultValue={v}
+                  min={n === "careMax" ? "0" : undefined}
+                  step={n === "careMax" ? "0.01" : undefined}
                   className={input}
                 />
               </Field>
