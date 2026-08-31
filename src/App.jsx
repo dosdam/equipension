@@ -443,6 +443,7 @@ export default function App() {
       : hasRiderLink
         ? "slate"
         : "red";
+  const isSaving = cloud === "saving";
   const googleProvider = new GoogleAuthProvider();
   const readImageAsDataUrl = (file) =>
     new Promise((resolve, reject) => {
@@ -461,10 +462,14 @@ export default function App() {
         reject(reader.error || new Error("Image read error"));
       reader.readAsDataURL(file);
     });
-  const addCare = (e) => {
+  const addCare = async (e) => {
     e.preventDefault();
     if (!selected || !canEditHorseId(selected.id)) {
       notify("Lecture seule: action non autorisee");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
       return;
     }
     const f = new FormData(e.currentTarget),
@@ -475,19 +480,51 @@ export default function App() {
         note: f.get("note"),
         by: "Admin Écurie",
       };
-    setHorses((x) =>
-      x.map((h) =>
-        h.id === selectedHorse ? { ...h, care: [c, ...h.care] } : h,
-      ),
+    const nextHorses = horses.map((h) =>
+      h.id === selectedHorse ? { ...h, care: [c, ...h.care] } : h,
     );
-    log("Soin ajouté", selected.name, `${c.type} • ${c.note}`);
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Soin ajouté",
+      subject: selected.name,
+      detail: `${c.type} • ${c.note}`,
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses: nextHorses,
+      riders,
+      audit: nextAudit,
+      permissions,
+    };
+    setHorses(nextHorses);
+    setAudit(nextAudit);
     setModal(null);
-    notify("Soin enregistré");
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, payload);
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify("Soin enregistré");
+    } catch (err) {
+      console.error("[addCare] Echec Firestore", err);
+      setHorses(horses);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Ajout du soin echoue");
+    }
   };
-  const addOuting = (e) => {
+  const addOuting = async (e) => {
     e.preventDefault();
     if (!selected || !canEditHorseId(selected.id)) {
       notify("Lecture seule: action non autorisee");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
       return;
     }
     const f = new FormData(e.currentTarget),
@@ -498,15 +535,44 @@ export default function App() {
         duration: f.get("duration"),
         by: "Admin Écurie",
       };
-    setHorses((x) =>
-      x.map((h) =>
-        h.id === selectedHorse
-          ? { ...h, status: "En sortie", outings: [o, ...h.outings] }
-          : h,
-      ),
+    const nextHorses = horses.map((h) =>
+      h.id === selectedHorse
+        ? { ...h, status: "En sortie", outings: [o, ...h.outings] }
+        : h,
     );
-    log("Sortie signalée", selected.name, `${o.place} • ${o.duration}`);
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Sortie signalée",
+      subject: selected.name,
+      detail: `${o.place} • ${o.duration}`,
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses: nextHorses,
+      riders,
+      audit: nextAudit,
+      permissions,
+    };
+    setHorses(nextHorses);
+    setAudit(nextAudit);
     setModal(null);
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, payload);
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify("Sortie enregistree");
+    } catch (err) {
+      console.error("[addOuting] Echec Firestore", err);
+      setHorses(horses);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Ajout de la sortie echoue");
+    }
   };
   const addHorse = async (e) => {
     e.preventDefault();
@@ -650,9 +716,13 @@ export default function App() {
   const updateHorse = async (e) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget),
-      id = f.get("id");
+      id = String(f.get("id") || "");
     if (!canEditHorseId(id)) {
       notify("Lecture seule: action non autorisee");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
       return;
     }
     const current = horses.find((h) => h.id === id),
@@ -678,15 +748,41 @@ export default function App() {
       status: f.get("status"),
       photo,
     };
-    setHorses((x) => x.map((h) => (h.id === id ? { ...h, ...next } : h)));
-    log(
-      "Fiche modifiee",
-      String(next.name || id),
-      "Informations equide mises a jour",
-    );
+    const nextHorses = horses.map((h) => (h.id === id ? { ...h, ...next } : h));
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Fiche modifiee",
+      subject: String(next.name || id),
+      detail: "Informations equide mises a jour",
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses: nextHorses,
+      riders,
+      audit: nextAudit,
+      permissions,
+    };
+    setHorses(nextHorses);
+    setAudit(nextAudit);
     setModal(null);
     setEditHorseId(null);
-    notify("Equide mis a jour");
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, payload);
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify("Equide mis a jour");
+    } catch (err) {
+      console.error("[updateHorse] Echec Firestore", err);
+      setHorses(horses);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Mise a jour de l'equide echouee");
+    }
   };
   const updateRider = async (e) => {
     e.preventDefault();
@@ -694,6 +790,10 @@ export default function App() {
       id = String(f.get("id") || "");
     if (!canEditRiderId(id)) {
       notify("Action non autorisee");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
       return;
     }
     const current = riders.find((r) => r.id === id),
@@ -712,15 +812,41 @@ export default function App() {
         phone: f.get("phone"),
         photo: photoData || current?.photo || "",
       };
-    setRiders((x) => x.map((r) => (r.id === id ? { ...r, ...next } : r)));
-    log(
-      "Fiche cavalier modifiee",
-      String(next.name || id),
-      "Informations cavalier mises a jour",
-    );
+    const nextRiders = riders.map((r) => (r.id === id ? { ...r, ...next } : r));
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Fiche cavalier modifiee",
+      subject: String(next.name || id),
+      detail: "Informations cavalier mises a jour",
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses,
+      riders: nextRiders,
+      audit: nextAudit,
+      permissions,
+    };
+    setRiders(nextRiders);
+    setAudit(nextAudit);
     setModal(null);
     setEditRiderId(null);
-    notify("Cavalier mis a jour");
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, payload);
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify("Cavalier mis a jour");
+    } catch (err) {
+      console.error("[updateRider] Echec Firestore", err);
+      setRiders(riders);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Mise a jour du cavalier echouee");
+    }
   };
   const loginWithGoogle = () => {
     if (!auth || authBusy) return;
@@ -764,31 +890,106 @@ export default function App() {
       },
     );
   };
-  const linkUserToRider = (e) => {
+  const linkUserToRider = async (e) => {
     e.preventDefault();
     if (!isAdmin) return;
+    if (!ref) {
+      notify("Firebase non configure");
+      return;
+    }
     const email = adminUserEmail.trim().toLowerCase();
     if (!adminRiderId || !email || !adminHorseId) {
       setAdminMessage("Choisis un cavalier, un email et un cheval");
       return;
     }
-    setRiders((list) =>
-      list.map((r) => {
-        if (r.id !== adminRiderId) return r;
-        const links = Array.isArray(r.links) ? r.links : [];
-        const nextLink = { horseId: adminHorseId, type: adminRole };
-        const withoutSameHorse = links.filter(
-          (l) => l.horseId !== adminHorseId,
-        );
-        return { ...r, email, links: [...withoutSameHorse, nextLink] };
-      }),
-    );
-    setAdminMessage("Association enregistree");
-    log(
-      "Association utilisateur",
-      adminRiderId,
-      `${email} lie a ${adminHorseId} (${adminRole})`,
-    );
+    const nextRiders = riders.map((r) => {
+      if (r.id !== adminRiderId) return r;
+      const links = Array.isArray(r.links) ? r.links : [];
+      const nextLink = { horseId: adminHorseId, type: adminRole };
+      const withoutSameHorse = links.filter((l) => l.horseId !== adminHorseId);
+      return { ...r, email, links: [...withoutSameHorse, nextLink] };
+    });
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Association utilisateur",
+      subject: adminRiderId,
+      detail: `${email} lie a ${adminHorseId} (${adminRole})`,
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses,
+      riders: nextRiders,
+      audit: nextAudit,
+      permissions,
+    };
+    setRiders(nextRiders);
+    setAudit(nextAudit);
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, payload);
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      setAdminMessage("Association enregistree");
+    } catch (err) {
+      console.error("[linkUserToRider] Echec Firestore", err);
+      setRiders(riders);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      setAdminMessage("Association non enregistree");
+      notify("Association echouee");
+    }
+  };
+
+  const updatePermission = async (
+    riderId,
+    horseId,
+    value,
+    riderName,
+    horseName,
+  ) => {
+    if (!isAdmin || !ref) return;
+    const nextPermissions = {
+      ...permissions,
+      [riderId]: {
+        ...(permissions[riderId] || {}),
+        [horseId]: value,
+      },
+    };
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Droit modifie",
+      subject: riderName,
+      detail: `${value} sur ${horseName}`,
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses,
+      riders,
+      audit: nextAudit,
+      permissions: nextPermissions,
+    };
+    setPermissions(nextPermissions);
+    setAudit(nextAudit);
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, payload);
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+    } catch (err) {
+      console.error("[updatePermission] Echec Firestore", err);
+      setPermissions(permissions);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Mise a jour des droits echouee");
+    }
   };
   const deleteLink = async (riderId, horseId) => {
     if (!isAdmin) {
@@ -1182,8 +1383,10 @@ export default function App() {
               <Field label="Compte rendu">
                 <textarea required name="note" className={input} />
               </Field>
-              <button className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white">
-                Enregistrer
+              <button
+                disabled={isSaving}
+                className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                {isSaving ? "Enregistrement..." : "Enregistrer"}
               </button>
             </form>
           </Modal>
@@ -1200,8 +1403,10 @@ export default function App() {
               <Field label="Durée">
                 <input required name="duration" className={input} />
               </Field>
-              <button className="w-full rounded-xl bg-amber-500 p-3 font-bold text-white">
-                Confirmer
+              <button
+                disabled={isSaving}
+                className="w-full rounded-xl bg-amber-500 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                {isSaving ? "Enregistrement..." : "Confirmer"}
               </button>
             </form>
           </Modal>
@@ -1481,8 +1686,10 @@ export default function App() {
                   <option>Demi-pension</option>
                   <option>Coach</option>
                 </select>
-                <button className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white sm:col-span-2">
-                  Enregistrer la liaison
+                <button
+                  disabled={isSaving}
+                  className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2">
+                  {isSaving ? "Enregistrement..." : "Enregistrer la liaison"}
                 </button>
               </form>
               {adminMessage && (
@@ -1544,15 +1751,11 @@ export default function App() {
                     className="mt-3 flex items-center justify-between border-t pt-3">
                     <span>{h.name}</span>
                     <select
-                      disabled={!isAdmin}
+                      disabled={!isAdmin || isSaving}
                       value={permissions[r.id]?.[h.id] || "none"}
                       onChange={(e) => {
                         const v = e.target.value;
-                        setPermissions((p) => ({
-                          ...p,
-                          [r.id]: { ...(p[r.id] || {}), [h.id]: v },
-                        }));
-                        log("Droit modifie", r.name, `${v} sur ${h.name}`);
+                        updatePermission(r.id, h.id, v, r.name, h.name);
                       }}
                       className="rounded-lg border p-2 disabled:cursor-not-allowed disabled:opacity-50">
                       <option value="none">Aucun</option>
@@ -1620,8 +1823,10 @@ export default function App() {
                 className={input}
               />
             </Field>
-            <button className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white">
-              Créer la fiche
+            <button
+              disabled={isSaving}
+              className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Enregistrement..." : "Créer la fiche"}
             </button>
           </form>
         </Modal>
@@ -1689,8 +1894,10 @@ export default function App() {
                 className={input}
               />
             </Field>
-            <button className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white">
-              Enregistrer
+            <button
+              disabled={isSaving}
+              className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Enregistrement..." : "Enregistrer"}
             </button>
           </form>
         </Modal>
@@ -1737,8 +1944,10 @@ export default function App() {
                 className={input}
               />
             </Field>
-            <button className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white">
-              Enregistrer
+            <button
+              disabled={isSaving}
+              className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Enregistrement..." : "Enregistrer"}
             </button>
           </form>
         </Modal>
@@ -1779,8 +1988,10 @@ export default function App() {
                 </select>
               </div>
             </Field>
-            <button className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white">
-              Creer le cavalier
+            <button
+              disabled={isSaving}
+              className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Enregistrement..." : "Creer le cavalier"}
             </button>
           </form>
         </Modal>
