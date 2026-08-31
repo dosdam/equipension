@@ -172,7 +172,7 @@ function HorseIcon({ size = 20 }) {
 }
 function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 sm:items-center sm:p-5">
+    <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/45 sm:items-center sm:p-5">
       <div className="max-h-[92vh] w-full max-w-lg overflow-auto rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
         <div className="sticky top-0 flex items-center justify-between border-b bg-white px-5 py-4">
           <h3 className="font-bold">{title}</h3>
