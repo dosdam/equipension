@@ -1426,7 +1426,7 @@ export default function App() {
               <p className="text-xs font-bold uppercase text-emerald-700">
                 ÉquiPension
               </p>
-              <h1 className="font-black">Haras des Vallons</h1>
+              <h1 className="font-black">Ranch de Chalouka</h1>
               <div className="mt-1">
                 <Pill tone={roleTone}>{roleLabel}</Pill>
               </div>
