@@ -10,7 +10,13 @@ cp .env.example .env
 npm run dev
 ```
 
-Renseignez les variables Firebase dans `.env`. Dans Firebase, activez Firestore. Le document `pensions/haras-des-vallons` est créé automatiquement au premier lancement.
+Renseignez les variables Firebase dans `.env`. Dans Firebase, activez Firestore. Le document `pensions/haras-des-vallons` est créé automatiquement au premier lancement. Les photos des soins sont compressées dans le navigateur puis stockées dans Firestore, sans utiliser Firebase Storage.
+
+Pour publier les règles Firestore :
+
+```bash
+firebase deploy --only firestore:rules
+```
 
 ## Déploiement Vercel
 

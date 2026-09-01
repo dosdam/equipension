@@ -209,6 +209,7 @@ export default function App() {
     [permissions, setPermissions] = useState(initialPermissions),
     [selectedHorse, setSelectedHorse] = useState(null),
     [modal, setModal] = useState(null),
+    [careDetail, setCareDetail] = useState(null),
     [query, setQuery] = useState(""),
     [toast, setToast] = useState(""),
     [cloud, setCloud] = useState(configured ? "auth-required" : "unconfigured");
@@ -227,7 +228,8 @@ export default function App() {
     [adminRole, setAdminRole] = useState("Propriétaire"),
     [adminMessage, setAdminMessage] = useState(""),
     [editHorseId, setEditHorseId] = useState(null),
-    [editRiderId, setEditRiderId] = useState(null);
+    [editRiderId, setEditRiderId] = useState(null),
+    [carePhotoPreview, setCarePhotoPreview] = useState("");
   useEffect(() => {
     if (!auth) {
       setUserReady(true);
@@ -466,7 +468,20 @@ export default function App() {
         return;
       }
       const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        const image = new Image();
+        image.onload = () => {
+          const scale = Math.min(1, 800 / Math.max(image.width, image.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.6));
+        };
+        image.onerror = () => reject(new Error("Image decode error"));
+        image.src = dataUrl;
+      };
       reader.onerror = () =>
         reject(reader.error || new Error("Image read error"));
       reader.readAsDataURL(file);
@@ -488,38 +503,43 @@ export default function App() {
       notify("Firebase non configure");
       return;
     }
-    const f = new FormData(e.currentTarget),
-      c = {
-        id: `c${Date.now()}`,
-        date: f.get("date"),
-        type: f.get("type"),
-        note: f.get("note"),
-        by: actorName,
-      };
-    const nextHorses = horses.map((h) =>
-      h.id === selectedHorse ? { ...h, care: [c, ...h.care] } : h,
-    );
-    const auditEntry = {
-      id: Date.now(),
-      at: new Date().toLocaleString("fr-FR"),
-      user: actorName,
-      action: "Soin ajouté",
-      subject: selected.name,
-      detail: `${c.type} • ${c.note}`,
-    };
-    const nextAudit = [auditEntry, ...audit];
-    const payload = {
-      horses: nextHorses,
-      riders,
-      audit: nextAudit,
-      permissions,
-    };
-    setHorses(nextHorses);
-    setAudit(nextAudit);
-    setModal(null);
-    setCloud("saving");
-    setCloudDetail("");
     try {
+      const f = new FormData(e.currentTarget),
+        pickedPhoto = f.get("photo"),
+        photoData = await readImageAsDataUrl(pickedPhoto),
+        c = {
+          id: `c${Date.now()}`,
+          date: f.get("date"),
+          type: f.get("type"),
+          note: f.get("note"),
+          photo: photoData || "",
+          by: actorName,
+        };
+      const nextHorses = horses.map((h) =>
+        h.id === selectedHorse
+          ? { ...h, care: [c, ...(Array.isArray(h.care) ? h.care : [])] }
+          : h,
+      );
+      const auditEntry = {
+        id: Date.now(),
+        at: new Date().toLocaleString("fr-FR"),
+        user: actorName,
+        action: "Soin ajouté",
+        subject: selected.name,
+        detail: `${c.type} • ${c.note}`,
+      };
+      const nextAudit = [auditEntry, ...audit];
+      const payload = {
+        horses: nextHorses,
+        riders,
+        audit: nextAudit,
+        permissions,
+      };
+      setHorses(nextHorses);
+      setAudit(nextAudit);
+      setModal(null);
+      setCloud("saving");
+      setCloudDetail("");
       await setDoc(ref, payload);
       last.current = JSON.stringify(payload);
       setCloud("synced");
@@ -1395,17 +1415,33 @@ export default function App() {
           </section>
           <section className="rounded-2xl bg-white p-5">
             <h2 className="mb-3 font-bold">Historique des soins</h2>
-            {selected.care.map((c) => (
-              <div
+            {(Array.isArray(selected.care) ? [...selected.care] : [])
+              .sort((a, b) =>
+                String(b.date ?? "").localeCompare(String(a.date ?? "")),
+              )
+              .map((c) => (
+              <button
+                type="button"
                 key={c.id}
-                className="border-l-2 border-emerald-300 py-2 pl-4">
+                onClick={() => setCareDetail(c)}
+                className="block w-full border-l-2 border-emerald-300 py-2 pl-4 text-left hover:bg-emerald-50">
                 <b>{c.type}</b>
                 <p className="text-sm">{c.note}</p>
+                {c.photo && (
+                  <img
+                    src={c.photo}
+                    alt={`Photo du soin ${c.type}`}
+                    className="mt-2 h-24 w-24 rounded-lg object-cover"
+                  />
+                )}
                 <small>
                   {fmt(c.date)} • {c.by}
                 </small>
-              </div>
-            ))}
+              </button>
+              ))}
+            {(!Array.isArray(selected.care) || selected.care.length === 0) && (
+              <p className="text-sm text-slate-500">Aucun soin enregistré.</p>
+            )}
           </section>
         </main>
         {modal === "care" && (
@@ -1420,12 +1456,57 @@ export default function App() {
               <Field label="Compte rendu">
                 <textarea required name="note" className={input} />
               </Field>
+              <Field label="Photo (optionnelle)">
+                <input
+                  name="photo"
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    setCarePhotoPreview(
+                      await readImageAsDataUrl(e.target.files?.[0]),
+                    );
+                  }}
+                  className={input}
+                />
+                {carePhotoPreview && (
+                  <img
+                    src={carePhotoPreview}
+                    alt="Aperçu de la photo du soin"
+                    className="mt-3 block h-32 w-32 rounded-lg object-cover"
+                  />
+                )}
+              </Field>
               <button
                 disabled={isSaving}
                 className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
                 {isSaving ? "Enregistrement..." : "Enregistrer"}
               </button>
             </form>
+          </Modal>
+        )}
+        {careDetail && (
+          <Modal
+            title={careDetail.type || "Détail du soin"}
+            onClose={() => setCareDetail(null)}
+          >
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600">
+                <b>Date :</b> {fmt(careDetail.date)}
+              </p>
+              <p className="text-sm text-slate-600">
+                <b>Compte rendu :</b> {careDetail.note || "Non renseigné"}
+              </p>
+              <p className="text-sm text-slate-600">
+                <b>Par :</b> {careDetail.by || "Non renseigné"}
+              </p>
+              {careDetail.photo && (
+                <img
+                  src={careDetail.photo}
+                  alt={`Photo du soin ${careDetail.type || ""}`}
+                  className="max-h-96 w-full rounded-xl object-contain"
+                />
+              )}
+            </div>
           </Modal>
         )}
         {modal === "outing" && (
