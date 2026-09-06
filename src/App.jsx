@@ -134,6 +134,7 @@ const firebaseErrorText = (e) => {
   const map = {
     "permission-denied": "Permission refusee par les regles Firestore",
     unauthenticated: "Connexion requise",
+    "resource-exhausted": "Document Firestore trop volumineux",
     "auth/invalid-credential": "Identifiants invalides",
     "auth/user-not-found": "Utilisateur introuvable",
     "auth/wrong-password": "Mot de passe incorrect",
