@@ -484,14 +484,32 @@ export default function App() {
         const dataUrl = String(reader.result || "");
         const image = new Image();
         image.onload = () => {
-          const scale = Math.min(1, 800 / Math.max(image.width, image.height));
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.round(image.width * scale));
-          canvas.height = Math.max(1, Math.round(image.height * scale));
-          canvas
-            .getContext("2d")
-            .drawImage(image, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/jpeg", 0.6));
+          let maxDimension = 800;
+          let quality = 0.6;
+          let compressed = "";
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const scale = Math.min(
+              1,
+              maxDimension / Math.max(image.width, image.height),
+            );
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.width * scale));
+            canvas.height = Math.max(1, Math.round(image.height * scale));
+            const context = canvas.getContext("2d");
+            if (!context) {
+              reject(new Error("Canvas unavailable"));
+              return;
+            }
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            compressed = canvas.toDataURL("image/jpeg", quality);
+            if (compressed.length <= 240000) {
+              resolve(compressed);
+              return;
+            }
+            maxDimension *= 0.8;
+            quality *= 0.85;
+          }
+          reject(new Error("Image too large after compression"));
         };
         image.onerror = () => reject(new Error("Image decode error"));
         image.src = dataUrl;
