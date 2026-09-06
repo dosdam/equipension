@@ -144,6 +144,33 @@ const firebaseErrorText = (e) => {
   };
   return map[code] || e?.message || "Erreur Firebase";
 };
+const firestorePayload = (payload) => {
+  const next = JSON.parse(JSON.stringify(payload));
+  const byteLength = (value) =>
+    typeof TextEncoder === "undefined"
+      ? value.length
+      : new TextEncoder().encode(value).length;
+  const dataUrl = (value) =>
+    typeof value === "string" && value.startsWith("data:image/");
+  const photoGroups = [
+    next.horses?.flatMap((horse) =>
+      (Array.isArray(horse.care) ? horse.care : []).map((care) => ({
+        item: care,
+        key: "photo",
+      })),
+    ) || [],
+    next.riders?.map((rider) => ({ item: rider, key: "photo" })) || [],
+    next.horses?.map((horse) => ({ item: horse, key: "photo" })) || [],
+  ];
+  const isTooLarge = () => byteLength(JSON.stringify(next)) > 900000;
+  for (const group of photoGroups) {
+    for (const entry of group) {
+      if (!isTooLarge()) return next;
+      if (dataUrl(entry.item[entry.key])) entry.item[entry.key] = "";
+    }
+  }
+  return next;
+};
 const ref = db ? doc(db, "pensions", "haras-des-vallons") : null;
 const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || "")
   .split(",")
@@ -295,12 +322,15 @@ export default function App() {
             setCloud("forbidden");
             return;
           }
-          await setDoc(ref, {
-            horses: initialHorses,
-            riders: initialRiders,
-            audit: initialAudit,
-            permissions: initialPermissions,
-          });
+          await setDoc(
+            ref,
+            firestorePayload({
+              horses: initialHorses,
+              riders: initialRiders,
+              audit: initialAudit,
+              permissions: initialPermissions,
+            }),
+          );
           return;
         }
         const d = s.data(),
@@ -355,7 +385,7 @@ export default function App() {
     setCloud("saving");
     const timer = setTimeout(
       () =>
-        setDoc(ref, p)
+        setDoc(ref, firestorePayload(p))
           .then(() => {
             last.current = s;
             setCloud("synced");
@@ -485,8 +515,8 @@ export default function App() {
         const dataUrl = String(reader.result || "");
         const image = new Image();
         image.onload = () => {
-          let maxDimension = 800;
-          let quality = 0.6;
+          let maxDimension = 1600;
+          let quality = 0.82;
           let compressed = "";
           for (let attempt = 0; attempt < 5; attempt += 1) {
             const scale = Math.min(
@@ -503,12 +533,12 @@ export default function App() {
             }
             context.drawImage(image, 0, 0, canvas.width, canvas.height);
             compressed = canvas.toDataURL("image/jpeg", quality);
-            if (compressed.length <= 240000) {
+            if (compressed.length <= 700000) {
               resolve(compressed);
               return;
             }
-            maxDimension *= 0.8;
-            quality *= 0.85;
+            maxDimension *= 0.88;
+            quality *= 0.92;
           }
           reject(new Error("Image too large after compression"));
         };
@@ -519,6 +549,29 @@ export default function App() {
         reject(reader.error || new Error("Image read error"));
       reader.readAsDataURL(file);
     });
+  const uploadImage = async (dataUrl, path) => {
+    if (!dataUrl) return "";
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !uploadPreset) {
+      throw new Error("Cloudinary non configure");
+    }
+    const blob = await fetch(dataUrl).then((response) => response.blob());
+    const body = new FormData();
+    body.append("file", blob, `${path}.jpg`);
+    body.append("upload_preset", uploadPreset);
+    body.append("folder", "equipension");
+    body.append("public_id", path.replaceAll("/", "-"));
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      { method: "POST", body },
+    );
+    if (!response.ok) {
+      throw new Error(`Cloudinary upload failed (${response.status})`);
+    }
+    const result = await response.json();
+    return result.secure_url || "";
+  };
   const normalizeCareMax = (value) => {
     const raw = String(value ?? "").trim();
     if (!raw) return "";
@@ -539,13 +592,17 @@ export default function App() {
     try {
       const f = new FormData(e.currentTarget),
         pickedPhoto = f.get("photo"),
+        careId = `c${Date.now()}`,
         photoData = await readImageAsDataUrl(pickedPhoto),
+        photo = photoData
+          ? await uploadImage(photoData, `care/${selectedHorse}-${careId}.jpg`)
+          : "",
         c = {
-          id: `c${Date.now()}`,
+          id: careId,
           date: f.get("date"),
           type: f.get("type"),
           note: f.get("note"),
-          photo: photoData || "",
+          photo,
           by: actorName,
         };
       const nextHorses = horses.map((h) =>
@@ -573,7 +630,7 @@ export default function App() {
       setModal(null);
       setCloud("saving");
       setCloudDetail("");
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Soin enregistré");
@@ -630,7 +687,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Sortie enregistree");
@@ -655,18 +712,19 @@ export default function App() {
     }
     const f = new FormData(e.currentTarget),
       picked = f.get("photo"),
+      horseId = `h${Date.now()}`,
       defaultPhoto =
         "https://images.unsplash.com/photo-1534773728080-33d31da27ae5?auto=format&fit=crop&w=1200&q=80";
     let photo = defaultPhoto;
     try {
       const dataUrl = await readImageAsDataUrl(picked);
-      if (dataUrl) photo = dataUrl;
+      if (dataUrl) photo = await uploadImage(dataUrl, `horses/${horseId}.jpg`);
     } catch (err) {
       console.error("[addHorse] Image read error", err);
       notify("Photo non lisible, image par defaut utilisee");
     }
     const h = {
-        id: `h${Date.now()}`,
+        id: horseId,
         name: f.get("name"),
         nickname: String(f.get("nickname") || ""),
         sex: f.get("sex"),
@@ -703,7 +761,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Equide cree");
@@ -728,18 +786,22 @@ export default function App() {
     }
     const f = new FormData(e.currentTarget),
       horseId = String(f.get("horseId") || ""),
+      riderId = `r${Date.now()}`,
       type = String(f.get("linkType") || ""),
       links = horseId && type ? [{ horseId, type }] : [],
       pickedPhoto = f.get("photo"),
       photoData = await readImageAsDataUrl(pickedPhoto),
+      photo = photoData
+        ? await uploadImage(photoData, `riders/${riderId}.jpg`)
+        : "",
       r = {
-        id: `r${Date.now()}`,
+        id: riderId,
         name: String(f.get("name") || ""),
         email: String(f.get("email") || "")
           .trim()
           .toLowerCase(),
         phone: String(f.get("phone") || ""),
-        photo: photoData || "",
+        photo,
         links,
       },
       detail = links.length
@@ -767,7 +829,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Cavalier cree");
@@ -802,10 +864,15 @@ export default function App() {
     let photo = current?.photo || "";
     try {
       const dataUrl = await readImageAsDataUrl(picked);
-      if (dataUrl) photo = dataUrl;
+      if (dataUrl) {
+        photo = await uploadImage(dataUrl, `horses/${id}-${Date.now()}`);
+      }
     } catch (err) {
-      console.error("[updateHorse] Image read error", err);
-      notify("Photo non modifiee: fichier non lisible");
+      console.error("[updateHorse] Image upload error", err);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Photo non enregistree");
+      return;
     }
     const next = {
       name: f.get("name"),
@@ -846,7 +913,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Equide mis a jour");
@@ -910,7 +977,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Cavalier mis a jour");
@@ -1004,7 +1071,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       setAdminMessage("Association enregistree");
@@ -1054,7 +1121,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
     } catch (err) {
@@ -1117,7 +1184,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Liaison supprimee");
@@ -1179,7 +1246,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Equide supprime");
@@ -1230,7 +1297,7 @@ export default function App() {
     setCloud("saving");
     setCloudDetail("");
     try {
-      await setDoc(ref, payload);
+      await setDoc(ref, firestorePayload(payload));
       last.current = JSON.stringify(payload);
       setCloud("synced");
       notify("Cavalier supprime");

@@ -10,7 +10,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Renseignez les variables Firebase dans `.env`. Dans Firebase, activez Firestore. Le document `pensions/haras-des-vallons` est créé automatiquement au premier lancement. Les photos des soins sont compressées dans le navigateur puis stockées dans Firestore, sans utiliser Firebase Storage.
+Renseignez les variables Firebase et Cloudinary dans `.env`. Dans Firebase, activez Firestore. Dans Cloudinary, créez un upload preset **unsigned**. Le document `pensions/haras-des-vallons` est créé automatiquement au premier lancement. Les photos sont compressées dans le navigateur puis stockées sur Cloudinary ; seule leur URL est conservée dans Firestore.
 
 Pour publier les règles Firestore :
 
@@ -20,7 +20,7 @@ firebase deploy --only firestore:rules
 
 ## Déploiement Vercel
 
-Ajoutez les six variables `VITE_FIREBASE_*` dans les variables d'environnement du projet, puis utilisez `npm run build`. Le dossier de sortie est `dist`.
+Ajoutez les variables `VITE_FIREBASE_*`, `VITE_CLOUDINARY_CLOUD_NAME` et `VITE_CLOUDINARY_UPLOAD_PRESET` dans les variables d'environnement du projet, puis utilisez `npm run build`. Le dossier de sortie est `dist`.
 
 ## Sécurité
 
