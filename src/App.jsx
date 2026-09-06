@@ -265,6 +265,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!configured || !currentUser) return;
+    if (!hydrated.current) return;
     const email = (currentUser.email || "").trim().toLowerCase(),
       admin = adminEmails.includes(email),
       rider = riders.find(
@@ -283,19 +284,16 @@ export default function App() {
   useEffect(() => {
     if (!ref || !userReady) return;
     const email = (currentUser?.email || "").trim().toLowerCase(),
-      admin = adminEmails.includes(email),
-      rider = riders.find(
-        (r) => (r.email || "").trim().toLowerCase() === email,
-      ),
-      linked = Boolean(
-        rider && Array.isArray(rider.links) && rider.links.length > 0,
-      ),
-      canAccess = admin || linked;
-    if (!canAccess) return;
+      admin = adminEmails.includes(email);
     return onSnapshot(
       ref,
       async (s) => {
         if (!s.exists()) {
+          if (!admin) {
+            hydrated.current = true;
+            setCloud("forbidden");
+            return;
+          }
           await setDoc(ref, {
             horses: initialHorses,
             riders: initialRiders,
@@ -311,12 +309,23 @@ export default function App() {
             audit: d.audit || [],
             permissions: d.permissions || {},
           };
+        const rider = n.riders.find(
+            (r) => (r.email || "").trim().toLowerCase() === email,
+          ),
+          linked = Boolean(
+            rider && Array.isArray(rider.links) && rider.links.length > 0,
+          ),
+          canAccess = admin || linked;
         last.current = JSON.stringify(n);
         setHorses(n.horses);
         setRiders(n.riders);
         setAudit(n.audit);
         setPermissions(n.permissions);
         hydrated.current = true;
+        if (!canAccess) {
+          setCloud("forbidden");
+          return;
+        }
         setCloud(s.metadata.hasPendingWrites ? "saving" : "synced");
         setCloudDetail("");
       },
@@ -326,7 +335,7 @@ export default function App() {
         setCloudDetail(firebaseErrorText(e));
       },
     );
-  }, [userReady, currentUser, riders]);
+  }, [userReady, currentUser]);
   useEffect(() => {
     if (!ref || !hydrated.current || !userReady) return;
     const email = (currentUser?.email || "").trim().toLowerCase(),
@@ -453,7 +462,10 @@ export default function App() {
         : "red";
   const actorName = isAdmin
     ? "Admin Écurie"
-    : currentRider?.name || currentUser?.displayName || currentUser?.email || "Utilisateur";
+    : currentRider?.name ||
+      currentUser?.displayName ||
+      currentUser?.email ||
+      "Utilisateur";
   const isSaving = cloud === "saving";
   const googleProvider = new GoogleAuthProvider();
   const readImageAsDataUrl = (file) =>
@@ -476,7 +488,9 @@ export default function App() {
           const canvas = document.createElement("canvas");
           canvas.width = Math.max(1, Math.round(image.width * scale));
           canvas.height = Math.max(1, Math.round(image.height * scale));
-          canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+          canvas
+            .getContext("2d")
+            .drawImage(image, 0, 0, canvas.width, canvas.height);
           resolve(canvas.toDataURL("image/jpeg", 0.6));
         };
         image.onerror = () => reject(new Error("Image decode error"));
@@ -1239,6 +1253,31 @@ export default function App() {
       setTab("home");
   }, [isAdmin, tab]);
 
+  if (cloud === "unconfigured")
+    return (
+      <div className="min-h-screen bg-slate-100 p-4">
+        <div className="mx-auto mt-16 w-full max-w-md rounded-3xl bg-white p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <div className="mx-auto mb-3 inline-flex rounded-2xl bg-amber-100 p-3 text-amber-700">
+              <CloudOff />
+            </div>
+            <h1 className="text-2xl font-black">Firebase à configurer</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Crée un fichier .env à partir de .env.example, renseigne les
+              variables Firebase puis redémarre npm run dev.
+            </p>
+          </div>
+          <div className="rounded-2xl bg-slate-100 p-4 text-sm text-slate-700">
+            <p className="font-bold">À vérifier dans Firebase Console</p>
+            <p className="mt-2">
+              Active Google et/ou Email/Mot de passe dans Authentication, puis
+              ajoute ton email dans VITE_ADMIN_EMAILS pour le premier accès.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+
   const Nav = () => (
     <nav className="fixed inset-x-0 bottom-0 z-[90] mx-auto flex max-w-lg justify-around border-t bg-white px-2 py-2 pointer-events-auto">
       {[
@@ -1338,6 +1377,10 @@ export default function App() {
               {currentUser?.email || "email inconnu"}). Contacte
               l'administrateur.
             </p>
+            <p className="mt-3 text-sm text-slate-600">
+              Pour le premier compte, ajoute cet email dans VITE_ADMIN_EMAILS,
+              redémarre l'app, puis reconnecte-toi.
+            </p>
           </div>
           <button
             onClick={logout}
@@ -1420,24 +1463,24 @@ export default function App() {
                 String(b.date ?? "").localeCompare(String(a.date ?? "")),
               )
               .map((c) => (
-              <button
-                type="button"
-                key={c.id}
-                onClick={() => setCareDetail(c)}
-                className="block w-full border-l-2 border-emerald-300 py-2 pl-4 text-left hover:bg-emerald-50">
-                <b>{c.type}</b>
-                <p className="text-sm">{c.note}</p>
-                {c.photo && (
-                  <img
-                    src={c.photo}
-                    alt={`Photo du soin ${c.type}`}
-                    className="mt-2 h-24 w-24 rounded-lg object-cover"
-                  />
-                )}
-                <small>
-                  {fmt(c.date)} • {c.by}
-                </small>
-              </button>
+                <button
+                  type="button"
+                  key={c.id}
+                  onClick={() => setCareDetail(c)}
+                  className="block w-full border-l-2 border-emerald-300 py-2 pl-4 text-left hover:bg-emerald-50">
+                  <b>{c.type}</b>
+                  <p className="text-sm">{c.note}</p>
+                  {c.photo && (
+                    <img
+                      src={c.photo}
+                      alt={`Photo du soin ${c.type}`}
+                      className="mt-2 h-24 w-24 rounded-lg object-cover"
+                    />
+                  )}
+                  <small>
+                    {fmt(c.date)} • {c.by}
+                  </small>
+                </button>
               ))}
             {(!Array.isArray(selected.care) || selected.care.length === 0) && (
               <p className="text-sm text-slate-500">Aucun soin enregistré.</p>
@@ -1487,8 +1530,7 @@ export default function App() {
         {careDetail && (
           <Modal
             title={careDetail.type || "Détail du soin"}
-            onClose={() => setCareDetail(null)}
-          >
+            onClose={() => setCareDetail(null)}>
             <div className="space-y-3">
               <p className="text-sm text-slate-600">
                 <b>Date :</b> {fmt(careDetail.date)}
