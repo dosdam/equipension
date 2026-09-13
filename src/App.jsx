@@ -481,11 +481,11 @@ export default function App() {
   const linkedOwnerNames = new Set(ownerRiders.map((rider) => rider.name));
   const ownerContacts = [
     ...ownerRiders,
-    ...((selected?.owners || [])
+    ...(selected?.owners || [])
       .map((owner) =>
         typeof owner === "string" ? { name: owner, phone: "" } : owner,
       )
-      .filter((owner) => owner?.name && !linkedOwnerNames.has(owner.name))),
+      .filter((owner) => owner?.name && !linkedOwnerNames.has(owner.name)),
   ];
   const ownerHorseIds = new Set(
     (currentRider?.links || [])
@@ -1757,7 +1757,9 @@ export default function App() {
                           aria-label={`Supprimer la photo ${index + 1}`}
                           onClick={() =>
                             setCarePhotoItems((current) =>
-                              current.filter((_, itemIndex) => itemIndex !== index),
+                              current.filter(
+                                (_, itemIndex) => itemIndex !== index,
+                              ),
                             )
                           }
                           className="absolute right-1 top-1 rounded-full bg-slate-900/75 p-1 text-white hover:bg-slate-900">
