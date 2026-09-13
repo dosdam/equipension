@@ -20,6 +20,8 @@ import {
   Cloud,
   CloudOff,
   LoaderCircle,
+  Trash2,
+  PhoneCall,
 } from "lucide-react";
 import {
   GoogleAuthProvider,
@@ -180,6 +182,12 @@ const fmt = (d) =>
   d
     ? new Intl.DateTimeFormat("fr-FR").format(new Date(d + "T12:00:00"))
     : "Non renseignée";
+const carePhotos = (care) =>
+  Array.isArray(care?.photos)
+    ? care.photos.filter(Boolean)
+    : care?.photo
+      ? [care.photo]
+      : [];
 const input =
   "w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100";
 function Pill({ children, tone = "green" }) {
@@ -238,6 +246,7 @@ export default function App() {
     [selectedHorse, setSelectedHorse] = useState(null),
     [modal, setModal] = useState(null),
     [careDetail, setCareDetail] = useState(null),
+    [carePhotoViewer, setCarePhotoViewer] = useState(""),
     [query, setQuery] = useState(""),
     [toast, setToast] = useState(""),
     [cloud, setCloud] = useState(configured ? "auth-required" : "unconfigured");
@@ -257,7 +266,7 @@ export default function App() {
     [adminMessage, setAdminMessage] = useState(""),
     [editHorseId, setEditHorseId] = useState(null),
     [editRiderId, setEditRiderId] = useState(null),
-    [carePhotoPreview, setCarePhotoPreview] = useState("");
+    [carePhotoItems, setCarePhotoItems] = useState([]);
   useEffect(() => {
     if (!auth) {
       setUserReady(true);
@@ -462,6 +471,22 @@ export default function App() {
     const v = normalizeLinkType(t);
     return v === "owner" || v === "proprietaire" || v === "propriétaire";
   };
+  const ownerRiders = selected
+    ? riders.filter((rider) =>
+        (rider.links || []).some(
+          (link) => link.horseId === selected.id && isOwnerLinkType(link.type),
+        ),
+      )
+    : [];
+  const linkedOwnerNames = new Set(ownerRiders.map((rider) => rider.name));
+  const ownerContacts = [
+    ...ownerRiders,
+    ...((selected?.owners || [])
+      .map((owner) =>
+        typeof owner === "string" ? { name: owner, phone: "" } : owner,
+      )
+      .filter((owner) => owner?.name && !linkedOwnerNames.has(owner.name))),
+  ];
   const ownerHorseIds = new Set(
     (currentRider?.links || [])
       .filter((l) => isOwnerLinkType(l?.type))
@@ -591,18 +616,25 @@ export default function App() {
     }
     try {
       const f = new FormData(e.currentTarget),
-        pickedPhoto = f.get("photo"),
+        pickedPhotos = carePhotoItems.map((item) => item.file),
         careId = `c${Date.now()}`,
-        photoData = await readImageAsDataUrl(pickedPhoto),
-        photo = photoData
-          ? await uploadImage(photoData, `care/${selectedHorse}-${careId}.jpg`)
-          : "",
+        photos = await Promise.all(
+          pickedPhotos.map(async (pickedPhoto, index) => {
+            const photoData = await readImageAsDataUrl(pickedPhoto);
+            return photoData
+              ? uploadImage(
+                  photoData,
+                  `care/${selectedHorse}-${careId}-${index}.jpg`,
+                )
+              : "";
+          }),
+        ),
         c = {
           id: careId,
           date: f.get("date"),
           type: f.get("type"),
           note: f.get("note"),
-          photo,
+          photos: photos.filter(Boolean),
           by: actorName,
         };
       const nextHorses = horses.map((h) =>
@@ -627,6 +659,7 @@ export default function App() {
       };
       setHorses(nextHorses);
       setAudit(nextAudit);
+      setCarePhotoItems([]);
       setModal(null);
       setCloud("saving");
       setCloudDetail("");
@@ -641,6 +674,65 @@ export default function App() {
       setCloud("error");
       setCloudDetail(firebaseErrorText(err));
       notify("Ajout du soin echoue");
+    }
+  };
+  const deleteCare = async () => {
+    if (!isAdmin) {
+      notify("Action reservee a l'admin");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
+      return;
+    }
+    const care = careDetail;
+    const horse = horses.find((h) => h.id === selectedHorse);
+    if (!care || !horse) return;
+    if (!window.confirm(`Supprimer le soin ${care.type || "sans type"} ?`)) {
+      return;
+    }
+    const nextHorses = horses.map((h) =>
+      h.id === selectedHorse
+        ? {
+            ...h,
+            care: (Array.isArray(h.care) ? h.care : []).filter(
+              (item) => item.id !== care.id,
+            ),
+          }
+        : h,
+    );
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: "Admin Écurie",
+      action: "Soin supprime",
+      subject: horse.name,
+      detail: care.type || "Soin sans type",
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses: nextHorses,
+      riders,
+      audit: nextAudit,
+      permissions,
+    };
+    setHorses(nextHorses);
+    setAudit(nextAudit);
+    setCareDetail(null);
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, firestorePayload(payload));
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify("Soin supprime");
+    } catch (err) {
+      console.error("[deleteCare] Echec Firestore", err);
+      setHorses(horses);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Suppression du soin echouee");
     }
   };
   const addOuting = async (e) => {
@@ -1542,6 +1634,34 @@ export default function App() {
               </p>
             </div>
           </section>
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <h2 className="mb-2 font-bold">Propriétaire(s)</h2>
+            {ownerContacts.length > 0 ? (
+              <div className="space-y-2">
+                {ownerContacts.map((owner, index) => {
+                  const phone = String(owner.phone || "").trim();
+                  return (
+                    <div
+                      key={`${owner.name}-${index}`}
+                      className="flex items-center justify-between gap-3 text-sm text-slate-600">
+                      <span>{owner.name}</span>
+                      {phone && (
+                        <a
+                          href={`tel:${phone.replace(/[^+\d]/g, "")}`}
+                          aria-label={`Appeler ${owner.name}`}
+                          title={`Appeler ${owner.name}`}
+                          className="rounded-full bg-emerald-100 p-2 text-emerald-700 hover:bg-emerald-200">
+                          <PhoneCall size={18} />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Non renseigné</p>
+            )}
+          </section>
           <section className="rounded-2xl bg-white p-5">
             <h2 className="mb-3 font-bold">Historique des soins</h2>
             {(Array.isArray(selected.care) ? [...selected.care] : [])
@@ -1556,12 +1676,21 @@ export default function App() {
                   className="block w-full border-l-2 border-emerald-300 py-2 pl-4 text-left hover:bg-emerald-50">
                   <b>{c.type}</b>
                   <p className="text-sm">{c.note}</p>
-                  {c.photo && (
-                    <img
-                      src={c.photo}
-                      alt={`Photo du soin ${c.type}`}
-                      className="mt-2 h-24 w-24 rounded-lg object-cover"
-                    />
+                  {carePhotos(c).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {carePhotos(c).map((photo, index) => (
+                        <img
+                          key={`${c.id}-photo-${index}`}
+                          src={photo}
+                          alt={`Photo ${index + 1} du soin ${c.type}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCarePhotoViewer(photo);
+                          }}
+                          className="h-24 w-24 cursor-zoom-in rounded-lg object-cover"
+                        />
+                      ))}
+                    </div>
                   )}
                   <small>
                     {fmt(c.date)} • {c.by}
@@ -1574,7 +1703,12 @@ export default function App() {
           </section>
         </main>
         {modal === "care" && (
-          <Modal title="Ajouter un soin" onClose={() => setModal(null)}>
+          <Modal
+            title="Ajouter un soin"
+            onClose={() => {
+              setModal(null);
+              setCarePhotoItems([]);
+            }}>
             <form onSubmit={addCare} className="space-y-4">
               <Field label="Date">
                 <input required name="date" type="date" className={input} />
@@ -1583,26 +1717,55 @@ export default function App() {
                 <input required name="type" className={input} />
               </Field>
               <Field label="Compte rendu">
-                <textarea required name="note" className={input} />
+                <textarea name="note" className={input} />
               </Field>
-              <Field label="Photo (optionnelle)">
+              <Field label="Photos (optionnelles)">
                 <input
-                  name="photo"
+                  name="photos"
                   type="file"
                   accept="image/*"
+                  multiple
                   onChange={async (e) => {
-                    setCarePhotoPreview(
-                      await readImageAsDataUrl(e.target.files?.[0]),
+                    const files = Array.from(e.target.files || []);
+                    const items = await Promise.all(
+                      files.map(async (file) => ({
+                        file,
+                        preview: await readImageAsDataUrl(file),
+                      })),
                     );
+                    setCarePhotoItems((current) => [
+                      ...current,
+                      ...items.filter((item) => item.preview),
+                    ]);
+                    e.target.value = "";
                   }}
                   className={input}
                 />
-                {carePhotoPreview && (
-                  <img
-                    src={carePhotoPreview}
-                    alt="Aperçu de la photo du soin"
-                    className="mt-3 block h-32 w-32 rounded-lg object-cover"
-                  />
+                {carePhotoItems.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {carePhotoItems.map((item, index) => (
+                      <div
+                        key={`${item.file.name}-${item.file.lastModified}-${index}`}
+                        className="relative">
+                        <img
+                          src={item.preview}
+                          alt={`Aperçu de la photo ${index + 1} du soin`}
+                          className="h-32 w-32 rounded-lg object-cover"
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Supprimer la photo ${index + 1}`}
+                          onClick={() =>
+                            setCarePhotoItems((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }
+                          className="absolute right-1 top-1 rounded-full bg-slate-900/75 p-1 text-white hover:bg-slate-900">
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </Field>
               <button
@@ -1627,15 +1790,58 @@ export default function App() {
               <p className="text-sm text-slate-600">
                 <b>Par :</b> {careDetail.by || "Non renseigné"}
               </p>
-              {careDetail.photo && (
-                <img
-                  src={careDetail.photo}
-                  alt={`Photo du soin ${careDetail.type || ""}`}
-                  className="max-h-96 w-full rounded-xl object-contain"
-                />
+              {carePhotos(careDetail).length > 0 && (
+                <div className="grid grid-cols-2 gap-3">
+                  {carePhotos(careDetail).map((photo, index) => (
+                    <img
+                      key={`care-detail-photo-${index}`}
+                      src={photo}
+                      alt={`Photo ${index + 1} du soin ${careDetail.type || ""}`}
+                      onClick={() => setCarePhotoViewer(photo)}
+                      className="max-h-96 w-full cursor-zoom-in rounded-xl object-contain"
+                    />
+                  ))}
+                </div>
+              )}
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={deleteCare}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose-600 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                  <Trash2 size={18} />
+                  Supprimer ce soin
+                </button>
               )}
             </div>
           </Modal>
+        )}
+        {carePhotoViewer && (
+          <div
+            className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/90 p-4"
+            onClick={() => setCarePhotoViewer("")}
+            role="button"
+            tabIndex={0}
+            aria-label="Fermer la photo agrandie"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" || event.key === "Enter") {
+                setCarePhotoViewer("");
+              }
+            }}>
+            <button
+              type="button"
+              onClick={() => setCarePhotoViewer("")}
+              aria-label="Fermer la photo agrandie"
+              className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-slate-900">
+              <X size={22} />
+            </button>
+            <img
+              src={carePhotoViewer}
+              alt="Photo du soin agrandie"
+              onClick={(event) => event.stopPropagation()}
+              className="max-h-[90vh] max-w-full rounded-xl object-contain"
+            />
+          </div>
         )}
         {modal === "outing" && (
           <Modal title="Signaler une sortie" onClose={() => setModal(null)}>
