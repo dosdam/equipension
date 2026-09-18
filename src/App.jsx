@@ -23,6 +23,7 @@ import {
   Trash2,
   PhoneCall,
   FileText,
+  Download,
 } from "lucide-react";
 import {
   GoogleAuthProvider,
@@ -100,6 +101,8 @@ const initialRiders = [
     name: "Camille Bernard",
     email: "camille@example.fr",
     phone: "06 12 34 56 78",
+    membershipPaid: false,
+    licenseActive: false,
     links: [{ horseId: "h1", type: "Propriétaire" }],
   },
   {
@@ -107,6 +110,8 @@ const initialRiders = [
     name: "Léa Martin",
     email: "lea@example.fr",
     phone: "06 23 45 67 89",
+    membershipPaid: false,
+    licenseActive: false,
     links: [{ horseId: "h1", type: "Demi-pension" }],
   },
   {
@@ -114,6 +119,8 @@ const initialRiders = [
     name: "Thomas Leroy",
     email: "thomas@example.fr",
     phone: "06 34 56 78 90",
+    membershipPaid: false,
+    licenseActive: false,
     links: [{ horseId: "h2", type: "Propriétaire" }],
   },
 ];
@@ -132,6 +139,7 @@ const initialPermissions = {
   r2: { h1: "modification" },
   r3: { h2: "modification" },
 };
+const initialVets = [];
 const firebaseErrorText = (e) => {
   const code = e?.code || "";
   const map = {
@@ -250,6 +258,7 @@ export default function App() {
   const [tab, setTab] = useState("home"),
     [horses, setHorses] = useState(initialHorses),
     [riders, setRiders] = useState(initialRiders),
+    [vets, setVets] = useState(initialVets),
     [audit, setAudit] = useState(initialAudit),
     [permissions, setPermissions] = useState(initialPermissions),
     [selectedHorse, setSelectedHorse] = useState(null),
@@ -275,6 +284,7 @@ export default function App() {
     [adminMessage, setAdminMessage] = useState(""),
     [editHorseId, setEditHorseId] = useState(null),
     [editRiderId, setEditRiderId] = useState(null),
+    [editVetId, setEditVetId] = useState(null),
     [carePhotoItems, setCarePhotoItems] = useState([]),
     [reportStartDate, setReportStartDate] = useState(yearStartInputValue),
     [reportEndDate, setReportEndDate] = useState(todayInputValue);
@@ -347,6 +357,7 @@ export default function App() {
             firestorePayload({
               horses: initialHorses,
               riders: initialRiders,
+              vets: initialVets,
               audit: initialAudit,
               permissions: initialPermissions,
             }),
@@ -357,6 +368,7 @@ export default function App() {
           n = {
             horses: d.horses || [],
             riders: d.riders || [],
+            vets: d.vets || [],
             audit: d.audit || [],
             permissions: d.permissions || {},
           };
@@ -370,6 +382,7 @@ export default function App() {
         last.current = JSON.stringify(n);
         setHorses(n.horses);
         setRiders(n.riders);
+        setVets(n.vets);
         setAudit(n.audit);
         setPermissions(n.permissions);
         hydrated.current = true;
@@ -399,7 +412,7 @@ export default function App() {
       ),
       canAccess = admin || linked;
     if (!canAccess) return;
-    const p = { horses, riders, audit, permissions },
+    const p = { horses, riders, vets, audit, permissions },
       s = JSON.stringify(p);
     if (s === last.current) return;
     setCloud("saving");
@@ -419,7 +432,7 @@ export default function App() {
       450,
     );
     return () => clearTimeout(timer);
-  }, [horses, riders, audit, permissions, userReady, currentUser]);
+  }, [horses, riders, vets, audit, permissions, userReady, currentUser]);
   const notify = (m) => {
       setToast(m);
       setTimeout(() => setToast(""), 2200);
@@ -460,6 +473,10 @@ export default function App() {
   const riderToEdit = useMemo(
     () => riders.find((r) => r.id === editRiderId) || null,
     [riders, editRiderId],
+  );
+  const vetToEdit = useMemo(
+    () => vets.find((vet) => vet.id === editVetId) || null,
+    [vets, editVetId],
   );
   const hasRiderLink = Boolean(
     currentRider &&
@@ -665,6 +682,7 @@ export default function App() {
       const payload = {
         horses: nextHorses,
         riders,
+        vets,
         audit: nextAudit,
         permissions,
       };
@@ -724,6 +742,7 @@ export default function App() {
     const payload = {
       horses: nextHorses,
       riders,
+      vets,
       audit: nextAudit,
       permissions,
     };
@@ -787,6 +806,7 @@ export default function App() {
     const payload = {
       horses: nextHorses,
       riders,
+      vets,
       audit: nextAudit,
       permissions,
     };
@@ -939,7 +959,13 @@ export default function App() {
       },
       nextHorses = [h, ...horses],
       nextAudit = [auditEntry, ...audit],
-      payload = { horses: nextHorses, riders, audit: nextAudit, permissions };
+      payload = {
+        horses: nextHorses,
+        riders,
+        vets,
+        audit: nextAudit,
+        permissions,
+      };
     setHorses(nextHorses);
     setAudit(nextAudit);
     setModal(null);
@@ -986,6 +1012,8 @@ export default function App() {
           .trim()
           .toLowerCase(),
         phone: String(f.get("phone") || ""),
+        membershipPaid: false,
+        licenseActive: false,
         photo,
         links,
       },
@@ -1002,7 +1030,13 @@ export default function App() {
       },
       nextRiders = [r, ...riders],
       nextAudit = [auditEntry, ...audit],
-      payload = { horses, riders: nextRiders, audit: nextAudit, permissions };
+      payload = {
+        horses,
+        riders: nextRiders,
+        vets,
+        audit: nextAudit,
+        permissions,
+      };
     console.info("[addRider] Tentative de creation", {
       email: r.email,
       horseId,
@@ -1030,6 +1064,136 @@ export default function App() {
       setCloudDetail(firebaseErrorText(err));
       notify("Creation du cavalier echouee");
     }
+  };
+  const saveVets = async (nextVets, auditEntry, successMessage) => {
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses,
+      riders,
+      vets: nextVets,
+      audit: nextAudit,
+      permissions,
+    };
+    setVets(nextVets);
+    setAudit(nextAudit);
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, firestorePayload(payload));
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify(successMessage);
+      return true;
+    } catch (err) {
+      console.error("[saveVets] Echec Firestore", err);
+      setVets(vets);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Modification du veterinaire echouee");
+      return false;
+    }
+  };
+  const addVet = async (e) => {
+    e.preventDefault();
+    if (!isAdmin) {
+      notify("Action reservee a l'admin");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
+      return;
+    }
+    const f = new FormData(e.currentTarget),
+      name = String(f.get("name") || "").trim(),
+      address = String(f.get("address") || "").trim();
+    if (!name || !address) {
+      notify("Le nom et l'adresse sont obligatoires");
+      return;
+    }
+    const vet = {
+      id: `v${Date.now()}`,
+      name,
+      address,
+      phone: String(f.get("phone") || "").trim(),
+    };
+    setModal(null);
+    await saveVets(
+      [vet, ...vets],
+      {
+        id: Date.now(),
+        at: new Date().toLocaleString("fr-FR"),
+        user: actorName,
+        action: "Veterinaire ajoute",
+        subject: vet.name,
+        detail: vet.address,
+      },
+      "Veterinaire ajoute",
+    );
+  };
+  const updateVet = async (e) => {
+    e.preventDefault();
+    if (!isAdmin) {
+      notify("Action reservee a l'admin");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
+      return;
+    }
+    const f = new FormData(e.currentTarget),
+      id = String(f.get("id") || ""),
+      name = String(f.get("name") || "").trim(),
+      address = String(f.get("address") || "").trim();
+    if (!name || !address) {
+      notify("Le nom et l'adresse sont obligatoires");
+      return;
+    }
+    const nextVets = vets.map((vet) =>
+      vet.id === id
+        ? { ...vet, name, address, phone: String(f.get("phone") || "").trim() }
+        : vet,
+    );
+    setModal(null);
+    setEditVetId(null);
+    await saveVets(
+      nextVets,
+      {
+        id: Date.now(),
+        at: new Date().toLocaleString("fr-FR"),
+        user: actorName,
+        action: "Veterinaire modifie",
+        subject: name,
+        detail: address,
+      },
+      "Veterinaire mis a jour",
+    );
+  };
+  const deleteVet = async (vetId) => {
+    if (!isAdmin) {
+      notify("Action reservee a l'admin");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
+      return;
+    }
+    const vet = vets.find((item) => item.id === vetId);
+    if (!vet || !window.confirm(`Supprimer le veterinaire ${vet.name} ?`)) {
+      return;
+    }
+    await saveVets(
+      vets.filter((item) => item.id !== vetId),
+      {
+        id: Date.now(),
+        at: new Date().toLocaleString("fr-FR"),
+        user: actorName,
+        action: "Veterinaire supprime",
+        subject: vet.name,
+        detail: "Fiche retiree",
+      },
+      "Veterinaire supprime",
+    );
   };
 
   const updateHorse = async (e) => {
@@ -1070,8 +1234,10 @@ export default function App() {
       diet: f.get("diet"),
       vet: String(f.get("vet") || ""),
       farrier: String(f.get("farrier") || ""),
-      careMax: normalizeCareMax(f.get("careMax")),
-      vaccine: f.get("vaccine"),
+      careMax: isAdmin
+        ? normalizeCareMax(f.get("careMax"))
+        : current?.careMax || "",
+      vaccine: isAdmin ? f.get("vaccine") : current?.vaccine || "",
       status: f.get("status"),
       photo,
     };
@@ -1088,6 +1254,7 @@ export default function App() {
     const payload = {
       horses: nextHorses,
       riders,
+      vets,
       audit: nextAudit,
       permissions,
     };
@@ -1138,6 +1305,12 @@ export default function App() {
         email,
         phone: f.get("phone"),
         photo: photoData || current?.photo || "",
+        membershipPaid: isAdmin
+          ? f.get("membershipPaid") === "on"
+          : Boolean(current?.membershipPaid),
+        licenseActive: isAdmin
+          ? f.get("licenseActive") === "on"
+          : Boolean(current?.licenseActive),
       };
     const nextRiders = riders.map((r) => (r.id === id ? { ...r, ...next } : r));
     const auditEntry = {
@@ -1152,6 +1325,7 @@ export default function App() {
     const payload = {
       horses,
       riders: nextRiders,
+      vets,
       audit: nextAudit,
       permissions,
     };
@@ -1174,6 +1348,84 @@ export default function App() {
       setCloudDetail(firebaseErrorText(err));
       notify("Mise a jour du cavalier echouee");
     }
+  };
+  const resetRiderStatuses = async () => {
+    if (!isAdmin) {
+      notify("Action reservee a l'admin");
+      return;
+    }
+    if (!ref) {
+      notify("Firebase non configure");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Remettre a zero les cotisations et les licences de tous les cavaliers ?",
+      )
+    ) {
+      return;
+    }
+    const nextRiders = riders.map((rider) => ({
+      ...rider,
+      membershipPaid: false,
+      licenseActive: false,
+    }));
+    const auditEntry = {
+      id: Date.now(),
+      at: new Date().toLocaleString("fr-FR"),
+      user: actorName,
+      action: "Statuts cavaliers remis a zero",
+      subject: "Tous les cavaliers",
+      detail: "Cotisations et licences desactivees",
+    };
+    const nextAudit = [auditEntry, ...audit];
+    const payload = {
+      horses,
+      riders: nextRiders,
+      vets,
+      audit: nextAudit,
+      permissions,
+    };
+    setRiders(nextRiders);
+    setAudit(nextAudit);
+    setCloud("saving");
+    setCloudDetail("");
+    try {
+      await setDoc(ref, firestorePayload(payload));
+      last.current = JSON.stringify(payload);
+      setCloud("synced");
+      notify("Statuts remis a zero");
+    } catch (err) {
+      console.error("[resetRiderStatuses] Echec Firestore", err);
+      setRiders(riders);
+      setAudit(audit);
+      setCloud("error");
+      setCloudDetail(firebaseErrorText(err));
+      notify("Remise a zero echouee");
+    }
+  };
+  const exportRidersWithout = (field, filename, title) => {
+    if (!isAdmin) {
+      notify("Action reservee a l'admin");
+      return;
+    }
+    const rows = riders.filter((rider) => !rider[field]);
+    const escapeCsv = (value) =>
+      `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csv = [
+      ["Nom", "Email", "Telephone"],
+      ...rows.map((rider) => [rider.name, rider.email, rider.phone]),
+    ]
+      .map((row) => row.map(escapeCsv).join(";"))
+      .join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify(`${rows.length} cavalier(s) exporte(s) : ${title}`);
   };
   const loginWithGoogle = () => {
     if (!auth || authBusy) return;
@@ -1248,6 +1500,7 @@ export default function App() {
     const payload = {
       horses,
       riders: nextRiders,
+      vets,
       audit: nextAudit,
       permissions,
     };
@@ -1298,6 +1551,7 @@ export default function App() {
     const payload = {
       horses,
       riders,
+      vets,
       audit: nextAudit,
       permissions: nextPermissions,
     };
@@ -1360,6 +1614,7 @@ export default function App() {
     const payload = {
       horses,
       riders: nextRiders,
+      vets,
       audit: nextAudit,
       permissions: nextPermissions,
     };
@@ -1420,6 +1675,7 @@ export default function App() {
     const payload = {
       horses: nextHorses,
       riders: nextRiders,
+      vets,
       audit: nextAudit,
       permissions: nextPermissions,
     };
@@ -1473,6 +1729,7 @@ export default function App() {
     const payload = {
       horses,
       riders: nextRiders,
+      vets,
       audit: nextAudit,
       permissions: nextPermissions,
     };
@@ -1520,7 +1777,10 @@ export default function App() {
     goTab(id);
   };
   useEffect(() => {
-    if (!isAdmin && (tab === "links" || tab === "rights" || tab === "audit"))
+    if (
+      !isAdmin &&
+      (tab === "links" || tab === "rights" || tab === "audit" || tab === "vets")
+    )
       setTab("home");
   }, [isAdmin, tab]);
 
@@ -1558,6 +1818,7 @@ export default function App() {
         ...(isAdmin
           ? [
               ["links", Link2, "Liaisons"],
+              ["vets", HeartPulse, "Vétérinaires"],
               ["rights", ShieldCheck, "Droits"],
               ["audit", History, "Journal"],
             ]
@@ -1699,22 +1960,26 @@ export default function App() {
               className="rounded-2xl bg-emerald-700 p-4 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
               Ajouter un soin
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setReportStartDate(yearStartInputValue());
-                setReportEndDate(todayInputValue());
-                setModal("outingReport");
-              }}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-slate-800 p-4 font-bold text-white">
-              <FileText size={18} />
-              Extraire les sorties
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setReportStartDate(yearStartInputValue());
+                  setReportEndDate(todayInputValue());
+                  setModal("outingReport");
+                }}
+                className="flex items-center justify-center gap-2 rounded-2xl bg-slate-800 p-4 font-bold text-white">
+                <FileText size={18} />
+                Extraire les sorties
+              </button>
+            )}
           </div>
           {[
             [
               "Informations",
-              `Arrivée : ${fmt(selected.arrival)} • Vaccin : ${fmt(selected.vaccine)}`,
+              isAdmin
+                ? `Arrivée : ${fmt(selected.arrival)} • Vaccin : ${fmt(selected.vaccine)}`
+                : `Arrivée : ${fmt(selected.arrival)}`,
             ],
             ["Régime particulier", selected.diet],
           ].map(([t, c]) => (
@@ -1732,10 +1997,12 @@ export default function App() {
               <p>
                 <b>Maréchal-ferrant :</b> {selected.farrier || "Non renseigné"}
               </p>
-              <p>
-                <b>Montant max soins acceptés :</b>{" "}
-                {selected.careMax ? `${selected.careMax} €` : "Non renseigné"}
-              </p>
+              {isAdmin && (
+                <p>
+                  <b>Montant max soins acceptés :</b>{" "}
+                  {selected.careMax ? `${selected.careMax} €` : "Non renseigné"}
+                </p>
+              )}
             </div>
           </section>
           <section className="rounded-2xl bg-white p-5 shadow-sm">
@@ -1766,77 +2033,82 @@ export default function App() {
               <p className="text-sm text-slate-500">Non renseigné</p>
             )}
           </section>
-          <section className="rounded-2xl bg-white p-5">
-            <h2 className="mb-3 font-bold">Historique des soins</h2>
-            {(Array.isArray(selected.care) ? [...selected.care] : [])
-              .sort((a, b) =>
-                String(b.date ?? "").localeCompare(String(a.date ?? "")),
-              )
-              .map((c) => (
-                <button
-                  type="button"
-                  key={c.id}
-                  onClick={() => setCareDetail(c)}
-                  className="block w-full border-l-2 border-emerald-300 py-2 pl-4 text-left hover:bg-emerald-50">
-                  <b>{c.type}</b>
-                  <p className="text-sm">{c.note}</p>
-                  {carePhotos(c).length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {carePhotos(c).map((photo, index) => (
-                        <img
-                          key={`${c.id}-photo-${index}`}
-                          src={photo}
-                          alt={`Photo ${index + 1} du soin ${c.type}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setCarePhotoViewer(photo);
-                          }}
-                          className="h-24 w-24 cursor-zoom-in rounded-lg object-cover"
-                        />
-                      ))}
-                    </div>
-                  )}
-                  <small>
-                    {fmt(c.date)} • {c.by}
-                  </small>
-                </button>
-              ))}
-            {(!Array.isArray(selected.care) || selected.care.length === 0) && (
-              <p className="text-sm text-slate-500">Aucun soin enregistré.</p>
-            )}
-          </section>
-          <section className="rounded-2xl bg-white p-5">
-            <h2 className="mb-3 font-bold">Historique des sorties</h2>
-            {(Array.isArray(selected.outings) ? [...selected.outings] : [])
-              .sort((a, b) =>
-                String(b.startDate || b.date || "").localeCompare(
-                  String(a.startDate || a.date || ""),
-                ),
-              )
-              .map((outing) => {
-                const startDate = outing.startDate || outing.date;
-                const endDate = outing.endDate || outing.date || startDate;
-                return (
-                  <article
-                    key={outing.id}
-                    className="border-l-2 border-amber-300 py-2 pl-4">
-                    <b>{outing.place || "Destination non renseignée"}</b>
-                    <p className="text-sm text-slate-600">
-                      {startDate === endDate
-                        ? fmt(startDate)
-                        : `${fmt(startDate)} au ${fmt(endDate)}`}
-                    </p>
-                    <small>{outing.by || "Déclarant non renseigné"}</small>
-                  </article>
-                );
-              })}
-            {(!Array.isArray(selected.outings) ||
-              selected.outings.length === 0) && (
-              <p className="text-sm text-slate-500">
-                Aucune sortie enregistrée.
-              </p>
-            )}
-          </section>
+          {isAdmin && (
+            <section className="rounded-2xl bg-white p-5">
+              <h2 className="mb-3 font-bold">Historique des soins</h2>
+              {(Array.isArray(selected.care) ? [...selected.care] : [])
+                .sort((a, b) =>
+                  String(b.date ?? "").localeCompare(String(a.date ?? "")),
+                )
+                .map((c) => (
+                  <button
+                    type="button"
+                    key={c.id}
+                    onClick={() => setCareDetail(c)}
+                    className="block w-full border-l-2 border-emerald-300 py-2 pl-4 text-left hover:bg-emerald-50">
+                    <b>{c.type}</b>
+                    <p className="text-sm">{c.note}</p>
+                    {carePhotos(c).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {carePhotos(c).map((photo, index) => (
+                          <img
+                            key={`${c.id}-photo-${index}`}
+                            src={photo}
+                            alt={`Photo ${index + 1} du soin ${c.type}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setCarePhotoViewer(photo);
+                            }}
+                            className="h-24 w-24 cursor-zoom-in rounded-lg object-cover"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <small>
+                      {fmt(c.date)} • {c.by}
+                    </small>
+                  </button>
+                ))}
+              {(!Array.isArray(selected.care) ||
+                selected.care.length === 0) && (
+                <p className="text-sm text-slate-500">Aucun soin enregistré.</p>
+              )}
+            </section>
+          )}
+          {isAdmin && (
+            <section className="rounded-2xl bg-white p-5">
+              <h2 className="mb-3 font-bold">Historique des sorties</h2>
+              {(Array.isArray(selected.outings) ? [...selected.outings] : [])
+                .sort((a, b) =>
+                  String(b.startDate || b.date || "").localeCompare(
+                    String(a.startDate || a.date || ""),
+                  ),
+                )
+                .map((outing) => {
+                  const startDate = outing.startDate || outing.date;
+                  const endDate = outing.endDate || outing.date || startDate;
+                  return (
+                    <article
+                      key={outing.id}
+                      className="border-l-2 border-amber-300 py-2 pl-4">
+                      <b>{outing.place || "Destination non renseignée"}</b>
+                      <p className="text-sm text-slate-600">
+                        {startDate === endDate
+                          ? fmt(startDate)
+                          : `${fmt(startDate)} au ${fmt(endDate)}`}
+                      </p>
+                      <small>{outing.by || "Déclarant non renseigné"}</small>
+                    </article>
+                  );
+                })}
+              {(!Array.isArray(selected.outings) ||
+                selected.outings.length === 0) && (
+                <p className="text-sm text-slate-500">
+                  Aucune sortie enregistrée.
+                </p>
+              )}
+            </section>
+          )}
         </main>
         {modal === "care" && (
           <Modal
@@ -2195,12 +2467,22 @@ export default function App() {
           <div className="space-y-3">
             <div className="mb-1 flex items-center justify-between gap-3">
               <h2 className="text-2xl font-black">Cavaliers</h2>
-              <button
-                disabled={!isAdmin}
-                onClick={() => setModal("rider")}
-                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-                <Plus className="inline" /> Ajouter
-              </button>
+              <div className="flex gap-2">
+                <button
+                  disabled={!isAdmin}
+                  onClick={() => setModal("rider")}
+                  className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                  <Plus className="inline" /> Ajouter
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={resetRiderStatuses}
+                    className="rounded-xl border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700">
+                    Remettre à zéro
+                  </button>
+                )}
+              </div>
             </div>
             {riders.map((r) => (
               <div key={r.id} className="rounded-2xl bg-white p-4 shadow-sm">
@@ -2239,6 +2521,16 @@ export default function App() {
                 <p className="text-xs text-slate-400">
                   {r.email} • {r.phone}
                 </p>
+                {(isAdmin || currentRider?.id === r.id) && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Pill tone={r.membershipPaid ? "green" : "red"}>
+                      Cotisation {r.membershipPaid ? "payée" : "non payée"}
+                    </Pill>
+                    <Pill tone={r.licenseActive ? "green" : "red"}>
+                      Licence {r.licenseActive ? "active" : "inactive"}
+                    </Pill>
+                  </div>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {r.links?.length ? (
                     r.links.map((l) => (
@@ -2253,6 +2545,119 @@ export default function App() {
                 </div>
               </div>
             ))}
+            {isAdmin && (
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                {[
+                  [
+                    "Cotisations non payées",
+                    "membershipPaid",
+                    "cotisations-non-payees.csv",
+                    "cotisations non payées",
+                  ],
+                  [
+                    "Licences inactives",
+                    "licenseActive",
+                    "licences-inactives.csv",
+                    "licences inactives",
+                  ],
+                ].map(([title, field, filename, exportTitle]) => {
+                  const missing = riders.filter((rider) => !rider[field]);
+                  return (
+                    <section
+                      key={field}
+                      className="rounded-2xl bg-white p-4 shadow-sm">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <h3 className="font-bold">{title}</h3>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            exportRidersWithout(field, filename, exportTitle)
+                          }
+                          className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-semibold text-slate-700">
+                          <Download size={15} /> Exporter
+                        </button>
+                      </div>
+                      {missing.length > 0 ? (
+                        <div className="space-y-2">
+                          {missing.map((rider) => (
+                            <div
+                              key={`${field}-${rider.id}`}
+                              className="flex items-center justify-between border-t pt-2 text-sm">
+                              <span>{rider.name}</span>
+                              <span className="text-xs text-slate-500">
+                                {rider.email}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">
+                          Aucun cavalier dans cette liste.
+                        </p>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {tab === "vets" && isAdmin && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-black">Vétérinaires</h2>
+                <p className="text-sm text-slate-500">
+                  Liste utilisée dans les fiches équidés
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModal("vet")}
+                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white">
+                <Plus className="inline" /> Ajouter
+              </button>
+            </div>
+            {vets.length > 0 ? (
+              <div className="space-y-3">
+                {vets.map((vet) => (
+                  <section
+                    key={vet.id}
+                    className="flex items-start justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm">
+                    <div>
+                      <h3 className="font-bold">{vet.name}</h3>
+                      <p className="text-sm text-slate-600">{vet.address}</p>
+                      {vet.phone && (
+                        <p className="mt-1 text-sm text-slate-500">
+                          {vet.phone}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditVetId(vet.id);
+                          setModal("editVet");
+                        }}
+                        className="rounded-lg border px-3 py-1.5 text-xs font-semibold text-slate-700">
+                        Modifier
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteVet(vet.id)}
+                        className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700">
+                        Supprimer
+                      </button>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <section className="rounded-2xl bg-white p-5 text-sm text-slate-500 shadow-sm">
+                Aucun vétérinaire enregistré.
+              </section>
+            )}
           </div>
         )}
         {tab === "links" && isAdmin && (
@@ -2411,6 +2816,67 @@ export default function App() {
           </div>
         )}
       </main>
+      {modal === "vet" && (
+        <Modal title="Nouveau vétérinaire" onClose={() => setModal(null)}>
+          <form onSubmit={addVet} className="space-y-3">
+            <Field label="Nom">
+              <input required name="name" className={input} />
+            </Field>
+            <Field label="Adresse">
+              <textarea required name="address" className={input} />
+            </Field>
+            <Field label="Téléphone (optionnel)">
+              <input name="phone" type="tel" className={input} />
+            </Field>
+            <button
+              disabled={isSaving}
+              className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Enregistrement..." : "Ajouter le vétérinaire"}
+            </button>
+          </form>
+        </Modal>
+      )}
+      {modal === "editVet" && vetToEdit && (
+        <Modal
+          title="Modifier un vétérinaire"
+          onClose={() => {
+            setModal(null);
+            setEditVetId(null);
+          }}>
+          <form onSubmit={updateVet} className="space-y-3">
+            <input type="hidden" name="id" value={vetToEdit.id} />
+            <Field label="Nom">
+              <input
+                required
+                name="name"
+                defaultValue={vetToEdit.name}
+                className={input}
+              />
+            </Field>
+            <Field label="Adresse">
+              <textarea
+                required
+                name="address"
+                defaultValue={vetToEdit.address}
+                className={input}
+              />
+            </Field>
+            <Field label="Téléphone (optionnel)">
+              <input
+                name="phone"
+                type="tel"
+                defaultValue={vetToEdit.phone || ""}
+                className={input}
+              />
+            </Field>
+            <button
+              disabled={isSaving}
+              className="w-full rounded-xl bg-emerald-700 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Enregistrement..." : "Enregistrer"}
+            </button>
+          </form>
+        </Modal>
+      )}
       {modal === "horse" && (
         <Modal title="Nouvel équidé" onClose={() => setModal(null)}>
           <form onSubmit={addHorse} className="space-y-3">
@@ -2421,7 +2887,6 @@ export default function App() {
               ["Date de naissance", "birth", "date"],
               ["Date d'arrivée", "arrival", "date"],
               ["Box / emplacement", "box", "text"],
-              ["Vétérinaire", "vet", "text"],
               ["Maréchal-ferrant", "farrier", "text"],
               ["Montant max soins acceptés (€)", "careMax", "number"],
               ["Dernier vaccin", "vaccine", "date"],
@@ -2437,6 +2902,16 @@ export default function App() {
                 />
               </Field>
             ))}
+            <Field label="Vétérinaire">
+              <select name="vet" className={input}>
+                <option value="">Aucun vétérinaire</option>
+                {vets.map((vet) => (
+                  <option key={vet.id} value={vet.name}>
+                    {vet.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Sexe">
               <select name="sex" className={input}>
                 <option>Jument</option>
@@ -2479,7 +2954,6 @@ export default function App() {
               ["Date de naissance", "birth", "date", horseToEdit.birth],
               ["Date d'arrivée", "arrival", "date", horseToEdit.arrival],
               ["Box / emplacement", "box", "text", horseToEdit.box],
-              ["Vétérinaire", "vet", "text", horseToEdit.vet || ""],
               [
                 "Maréchal-ferrant",
                 "farrier",
@@ -2493,19 +2967,38 @@ export default function App() {
                 horseToEdit.careMax || "",
               ],
               ["Dernier vaccin", "vaccine", "date", horseToEdit.vaccine],
-            ].map(([l, n, t, v]) => (
-              <Field key={n} label={l}>
-                <input
-                  required={n === "name"}
-                  name={n}
-                  type={t}
-                  defaultValue={v}
-                  min={n === "careMax" ? "0" : undefined}
-                  step={n === "careMax" ? "0.01" : undefined}
-                  className={input}
-                />
-              </Field>
-            ))}
+            ]
+              .filter(([, n]) => isAdmin || !["careMax", "vaccine"].includes(n))
+              .map(([l, n, t, v]) => (
+                <Field key={n} label={l}>
+                  <input
+                    required={n === "name"}
+                    name={n}
+                    type={t}
+                    defaultValue={v}
+                    min={n === "careMax" ? "0" : undefined}
+                    step={n === "careMax" ? "0.01" : undefined}
+                    className={input}
+                  />
+                </Field>
+              ))}
+            <Field label="Vétérinaire">
+              <select
+                name="vet"
+                defaultValue={horseToEdit.vet || ""}
+                className={input}>
+                <option value="">Aucun vétérinaire</option>
+                {horseToEdit.vet &&
+                  !vets.some((vet) => vet.name === horseToEdit.vet) && (
+                    <option value={horseToEdit.vet}>{horseToEdit.vet}</option>
+                  )}
+                {vets.map((vet) => (
+                  <option key={vet.id} value={vet.name}>
+                    {vet.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Sexe">
               <select
                 name="sex"
@@ -2583,6 +3076,28 @@ export default function App() {
                 className={input}
               />
             </Field>
+            {isAdmin && (
+              <div className="space-y-3 rounded-xl bg-slate-50 p-3">
+                <label className="flex items-center gap-3 text-sm font-semibold">
+                  <input
+                    name="membershipPaid"
+                    type="checkbox"
+                    defaultChecked={Boolean(riderToEdit.membershipPaid)}
+                    className="h-4 w-4 accent-emerald-700"
+                  />
+                  Cotisation payée
+                </label>
+                <label className="flex items-center gap-3 text-sm font-semibold">
+                  <input
+                    name="licenseActive"
+                    type="checkbox"
+                    defaultChecked={Boolean(riderToEdit.licenseActive)}
+                    className="h-4 w-4 accent-emerald-700"
+                  />
+                  Licence active
+                </label>
+              </div>
+            )}
             <Field label="Photo (optionnelle)">
               <input
                 name="photo"
