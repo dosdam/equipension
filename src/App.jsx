@@ -22,6 +22,7 @@ import {
   LoaderCircle,
   Trash2,
   PhoneCall,
+  FileText,
 } from "lucide-react";
 import {
   GoogleAuthProvider,
@@ -85,8 +86,8 @@ const initialHorses = [
       {
         id: "o1",
         place: "Concours CSO Metz",
-        date: "2026-08-31",
-        duration: "Journée",
+        startDate: "2026-08-31",
+        endDate: "2026-08-31",
         by: "Thomas Leroy",
       },
     ],
@@ -182,6 +183,14 @@ const fmt = (d) =>
   d
     ? new Intl.DateTimeFormat("fr-FR").format(new Date(d + "T12:00:00"))
     : "Non renseignée";
+const dateInputValue = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+const todayInputValue = () => dateInputValue(new Date());
+const yearStartInputValue = () => `${new Date().getFullYear()}-01-01`;
 const carePhotos = (care) =>
   Array.isArray(care?.photos)
     ? care.photos.filter(Boolean)
@@ -266,7 +275,9 @@ export default function App() {
     [adminMessage, setAdminMessage] = useState(""),
     [editHorseId, setEditHorseId] = useState(null),
     [editRiderId, setEditRiderId] = useState(null),
-    [carePhotoItems, setCarePhotoItems] = useState([]);
+    [carePhotoItems, setCarePhotoItems] = useState([]),
+    [reportStartDate, setReportStartDate] = useState(yearStartInputValue),
+    [reportEndDate, setReportEndDate] = useState(todayInputValue);
   useEffect(() => {
     if (!auth) {
       setUserReady(true);
@@ -749,10 +760,14 @@ export default function App() {
       o = {
         id: `o${Date.now()}`,
         place: f.get("place"),
-        date: f.get("date"),
-        duration: f.get("duration"),
+        startDate: f.get("startDate"),
+        endDate: f.get("endDate"),
         by: actorName,
       };
+    if (o.endDate < o.startDate) {
+      notify("La date de fin doit etre posterieure ou egale a la date de debut");
+      return;
+    }
     const nextHorses = horses.map((h) =>
       h.id === selectedHorse
         ? { ...h, status: "En sortie", outings: [o, ...h.outings] }
@@ -764,7 +779,7 @@ export default function App() {
       user: actorName,
       action: "Sortie signalée",
       subject: selected.name,
-      detail: `${o.place} • ${o.duration}`,
+      detail: `${o.place} • ${fmt(o.startDate)} au ${fmt(o.endDate)}`,
     };
     const nextAudit = [auditEntry, ...audit];
     const payload = {
@@ -791,6 +806,82 @@ export default function App() {
       setCloudDetail(firebaseErrorText(err));
       notify("Ajout de la sortie echoue");
     }
+  };
+  const printOutingReport = (e) => {
+    e.preventDefault();
+    if (!selected) return;
+    if (reportStartDate > reportEndDate) {
+      notify("La date de debut doit preceder la date de fin");
+      return;
+    }
+    const outings = (Array.isArray(selected.outings) ? selected.outings : [])
+      .map((outing) => ({
+        ...outing,
+        startDate: outing.startDate || outing.date || "",
+        endDate: outing.endDate || outing.date || "",
+      }))
+      .filter(
+        (outing) =>
+          outing.startDate <= reportEndDate &&
+          outing.endDate >= reportStartDate,
+      )
+      .sort((a, b) => a.startDate.localeCompare(b.startDate));
+    const escapeHtml = (value) =>
+      String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    const rows = outings.length
+      ? outings
+          .map(
+            (outing) => `
+              <tr>
+                <td>${escapeHtml(fmt(outing.startDate))}</td>
+                <td>${escapeHtml(fmt(outing.endDate))}</td>
+                <td>${escapeHtml(outing.place || "Non renseignee")}</td>
+                <td>${escapeHtml(outing.by || "Non renseigne")}</td>
+              </tr>`,
+          )
+          .join("")
+      : '<tr><td colspan="4" class="empty">Aucune sortie sur cette periode.</td></tr>';
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) {
+      notify("Autorisez les fenetres pop-up pour editer le PDF");
+      return;
+    }
+    reportWindow.document.write(`<!doctype html>
+      <html lang="fr">
+        <head>
+          <meta charset="UTF-8" />
+          <title>Sorties - ${escapeHtml(selected.name)}</title>
+          <style>
+            @page { margin: 18mm; }
+            body { color: #172033; font: 14px Arial, sans-serif; }
+            h1 { margin: 0 0 8px; font-size: 24px; }
+            .period { color: #526071; margin-bottom: 28px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d7dde5; padding: 10px; text-align: left; }
+            th { background: #edf3ef; font-size: 12px; text-transform: uppercase; }
+            .empty { color: #526071; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <h1>Recapitulatif des sorties</h1>
+          <div class="period"><strong>Equide :</strong> ${escapeHtml(selected.name)}<br />
+            <strong>Du :</strong> ${escapeHtml(fmt(reportStartDate))}
+            <strong> au :</strong> ${escapeHtml(fmt(reportEndDate))}</div>
+          <table>
+            <thead><tr><th>Debut</th><th>Fin</th><th>Destination</th><th>Declaree par</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>`);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.setTimeout(() => reportWindow.print(), 250);
+    setModal(null);
   };
   const addHorse = async (e) => {
     e.preventDefault();
@@ -1593,7 +1684,7 @@ export default function App() {
           </div>
         </div>
         <main className="mx-auto max-w-3xl space-y-4 p-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-3">
             <button
               disabled={!canEditHorseId(selected.id)}
               onClick={() => setModal("outing")}
@@ -1605,6 +1696,17 @@ export default function App() {
               onClick={() => setModal("care")}
               className="rounded-2xl bg-emerald-700 p-4 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
               Ajouter un soin
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setReportStartDate(yearStartInputValue());
+                setReportEndDate(todayInputValue());
+                setModal("outingReport");
+              }}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-slate-800 p-4 font-bold text-white">
+              <FileText size={18} />
+              Extraire les sorties
             </button>
           </div>
           {[
@@ -1699,6 +1801,38 @@ export default function App() {
               ))}
             {(!Array.isArray(selected.care) || selected.care.length === 0) && (
               <p className="text-sm text-slate-500">Aucun soin enregistré.</p>
+            )}
+          </section>
+          <section className="rounded-2xl bg-white p-5">
+            <h2 className="mb-3 font-bold">Historique des sorties</h2>
+            {(Array.isArray(selected.outings) ? [...selected.outings] : [])
+              .sort((a, b) =>
+                String(b.startDate || b.date || "").localeCompare(
+                  String(a.startDate || a.date || ""),
+                ),
+              )
+              .map((outing) => {
+                const startDate = outing.startDate || outing.date;
+                const endDate = outing.endDate || outing.date || startDate;
+                return (
+                  <article
+                    key={outing.id}
+                    className="border-l-2 border-amber-300 py-2 pl-4">
+                    <b>{outing.place || "Destination non renseignée"}</b>
+                    <p className="text-sm text-slate-600">
+                      {startDate === endDate
+                        ? fmt(startDate)
+                        : `${fmt(startDate)} au ${fmt(endDate)}`}
+                    </p>
+                    <small>{outing.by || "Déclarant non renseigné"}</small>
+                  </article>
+                );
+              })}
+            {(!Array.isArray(selected.outings) ||
+              selected.outings.length === 0) && (
+              <p className="text-sm text-slate-500">
+                Aucune sortie enregistrée.
+              </p>
             )}
           </section>
         </main>
@@ -1851,16 +1985,60 @@ export default function App() {
               <Field label="Destination">
                 <input required name="place" className={input} />
               </Field>
-              <Field label="Date">
-                <input required name="date" type="date" className={input} />
+              <Field label="Date de début">
+                <input
+                  required
+                  name="startDate"
+                  type="date"
+                  className={input}
+                />
               </Field>
-              <Field label="Durée">
-                <input required name="duration" className={input} />
+              <Field label="Date de fin">
+                <input
+                  required
+                  name="endDate"
+                  type="date"
+                  className={input}
+                />
               </Field>
               <button
                 disabled={isSaving}
                 className="w-full rounded-xl bg-amber-500 p-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
                 {isSaving ? "Enregistrement..." : "Confirmer"}
+              </button>
+            </form>
+          </Modal>
+        )}
+        {modal === "outingReport" && (
+          <Modal
+            title="Extraire les sorties"
+            onClose={() => setModal(null)}>
+            <form onSubmit={printOutingReport} className="space-y-4">
+              <p className="text-sm text-slate-600">
+                Le document contiendra les sorties de {selected.name} sur la
+                periode choisie.
+              </p>
+              <Field label="Date de debut">
+                <input
+                  required
+                  type="date"
+                  value={reportStartDate}
+                  onChange={(event) => setReportStartDate(event.target.value)}
+                  className={input}
+                />
+              </Field>
+              <Field label="Date de fin">
+                <input
+                  required
+                  type="date"
+                  value={reportEndDate}
+                  onChange={(event) => setReportEndDate(event.target.value)}
+                  className={input}
+                />
+              </Field>
+              <button className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 p-3 font-bold text-white">
+                <FileText size={18} />
+                Ouvrir l'edition PDF
               </button>
             </form>
           </Modal>
