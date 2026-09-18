@@ -765,7 +765,9 @@ export default function App() {
         by: actorName,
       };
     if (o.endDate < o.startDate) {
-      notify("La date de fin doit etre posterieure ou egale a la date de debut");
+      notify(
+        "La date de fin doit etre posterieure ou egale a la date de debut",
+      );
       return;
     }
     const nextHorses = horses.map((h) =>
@@ -1994,12 +1996,7 @@ export default function App() {
                 />
               </Field>
               <Field label="Date de fin">
-                <input
-                  required
-                  name="endDate"
-                  type="date"
-                  className={input}
-                />
+                <input required name="endDate" type="date" className={input} />
               </Field>
               <button
                 disabled={isSaving}
@@ -2010,9 +2007,7 @@ export default function App() {
           </Modal>
         )}
         {modal === "outingReport" && (
-          <Modal
-            title="Extraire les sorties"
-            onClose={() => setModal(null)}>
+          <Modal title="Extraire les sorties" onClose={() => setModal(null)}>
             <form onSubmit={printOutingReport} className="space-y-4">
               <p className="text-sm text-slate-600">
                 Le document contiendra les sorties de {selected.name} sur la
